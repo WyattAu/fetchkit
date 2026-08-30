@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["reqwest_middleware",[["impl UnsafeUnpin for <a class=\"enum\" href=\"reqwest_middleware/enum.Error.html\" title=\"enum reqwest_middleware::Error\">Error</a>",0,1,["reqwest_middleware::error::Error"]],["impl UnsafeUnpin for <a class=\"struct\" href=\"reqwest_middleware/struct.ClientBuilder.html\" title=\"struct reqwest_middleware::ClientBuilder\">ClientBuilder</a>",0,1,["reqwest_middleware::client::ClientBuilder"]],["impl UnsafeUnpin for <a class=\"struct\" href=\"reqwest_middleware/struct.ClientWithMiddleware.html\" title=\"struct reqwest_middleware::ClientWithMiddleware\">ClientWithMiddleware</a>",0,1,["reqwest_middleware::client::ClientWithMiddleware"]],["impl UnsafeUnpin for <a class=\"struct\" href=\"reqwest_middleware/struct.RequestBuilder.html\" title=\"struct reqwest_middleware::RequestBuilder\">RequestBuilder</a>",0,1,["reqwest_middleware::client::RequestBuilder"]],["impl&lt;'a&gt; UnsafeUnpin for <a class=\"struct\" href=\"reqwest_middleware/struct.Next.html\" title=\"struct reqwest_middleware::Next\">Next</a>&lt;'a&gt;",0,1,["reqwest_middleware::middleware::Next"]],["impl&lt;T&gt; UnsafeUnpin for <a class=\"struct\" href=\"reqwest_middleware/struct.Extension.html\" title=\"struct reqwest_middleware::Extension\">Extension</a>&lt;T&gt;<div class=\"where\">where\n    T: UnsafeUnpin,</div>",0,1,["reqwest_middleware::req_init::Extension"]]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1370]}
