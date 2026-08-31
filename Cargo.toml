@@ -25,6 +25,8 @@ tracing = { version = "0.1", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 serde = { version = "1", features = ["derive"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
 
 [features]
 default = ["json", "rustls-tls"]
@@ -33,3 +35,7 @@ rustls-tls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls"]
 circuit-breaker = []
 metrics = ["dep:tower"]
+
+[[bench]]
+name = "fetch_bench"
+harness = false
