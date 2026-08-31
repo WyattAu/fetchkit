@@ -1,4 +1,4 @@
-# fetchkit
+# resilient-fetch
 
 Resilient HTTP client for Rust — retry, circuit breaker, connection pooling, and typed JSON helpers built on reqwest.
 
