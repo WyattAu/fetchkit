@@ -21,7 +21,7 @@ pub use reqwest::Response;
 #[derive(Clone, Debug)]
 pub struct Client {
     inner: ClientWithMiddleware,
-    base_url: Option<String>,
+    pub(crate) base_url: Option<String>,
 }
 
 /// Builder for constructing a [`Client`] with custom configuration.
@@ -107,7 +107,7 @@ impl Client {
     }
 
     /// Resolve a path against the optional base URL.
-    fn resolve_url(&self, url: &str) -> String {
+    pub(crate) fn resolve_url(&self, url: &str) -> String {
         match &self.base_url {
             Some(base) => {
                 let base = base.trim_end_matches('/');
@@ -174,5 +174,168 @@ impl Client {
 impl Default for Client {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn client_builder_default_timeout() {
+        let builder = ClientBuilder::new();
+        assert_eq!(builder.retries, 3);
+    }
+
+    #[test]
+    fn client_builder_default_retries() {
+        let builder = ClientBuilder::new();
+        assert_eq!(builder.retries, 3);
+    }
+
+    #[test]
+    fn client_builder_default_no_base_url() {
+        let builder = ClientBuilder::new();
+        assert!(builder.base_url.is_none());
+    }
+
+    #[test]
+    fn client_builder_custom_timeout() {
+        let builder = ClientBuilder::new().timeout(Duration::from_secs(10));
+        let client = builder.build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_custom_retries() {
+        let builder = ClientBuilder::new().retries(5);
+        assert_eq!(builder.retries, 5);
+    }
+
+    #[test]
+    fn client_builder_custom_base_url() {
+        let builder = ClientBuilder::new().base_url("https://api.example.com");
+        let client = builder.build();
+        assert!(client.base_url.is_some());
+        assert_eq!(client.base_url.as_deref(), Some("https://api.example.com"));
+    }
+
+    #[test]
+    fn client_builder_chaining() {
+        let client = ClientBuilder::new()
+            .base_url("https://api.example.com")
+            .timeout(Duration::from_secs(60))
+            .retries(10)
+            .build();
+        assert_eq!(client.base_url.as_deref(), Some("https://api.example.com"));
+    }
+
+    #[test]
+    fn fetch_error_network_display() {
+        let err = FetchError::Network("connection refused".into());
+        let msg = err.to_string();
+        assert!(msg.contains("connection refused"));
+    }
+
+    #[test]
+    fn fetch_error_timeout_display() {
+        let err = FetchError::Timeout(Duration::from_secs(5));
+        let msg = err.to_string();
+        assert!(msg.contains("5s"));
+    }
+
+    #[test]
+    fn fetch_error_status_code_display() {
+        let err = FetchError::StatusCode {
+            status: 404,
+            body: "not found".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("404"));
+        assert!(msg.contains("not found"));
+    }
+
+    #[test]
+    fn fetch_error_serialization_display() {
+        let json_err =
+            serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err = FetchError::Serialization(json_err);
+        let msg = err.to_string();
+        assert!(msg.contains("serialization error"));
+    }
+
+    #[test]
+    fn fetch_error_circuit_open_display() {
+        let err = FetchError::CircuitOpen;
+        let msg = err.to_string();
+        assert!(msg.contains("circuit breaker"));
+    }
+
+    #[test]
+    fn fetch_error_middleware_display() {
+        let err = FetchError::Middleware("tower error".into());
+        let msg = err.to_string();
+        assert!(msg.contains("tower error"));
+    }
+
+    #[test]
+    fn url_resolution_base_with_relative_path() {
+        let client = Client::new();
+        let client = Client {
+            base_url: Some("https://api.example.com".into()),
+            ..client
+        };
+        let resolved = client.resolve_url("/users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn url_resolution_no_base_url() {
+        let client = Client::new();
+        let resolved = client.resolve_url("/users/1");
+        assert_eq!(resolved, "/users/1");
+    }
+
+    #[test]
+    fn url_resolution_base_trailing_slash() {
+        let client = Client {
+            base_url: Some("https://api.example.com/".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("/users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn url_resolution_path_no_leading_slash() {
+        let client = Client {
+            base_url: Some("https://api.example.com".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn url_resolution_empty_base_trailing_slash() {
+        let client = Client {
+            base_url: Some("https://api.example.com/".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn client_default_trait() {
+        let client = Client::default();
+        assert!(client.base_url.is_none());
+    }
+
+    #[test]
+    fn client_builder_default_trait() {
+        let builder = ClientBuilder::default();
+        assert_eq!(builder.retries, 3);
     }
 }
