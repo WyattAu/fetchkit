@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 //! Resilient HTTP client for Rust.
 //!
@@ -6,6 +7,7 @@
 //! timeouts, and typed JSON helpers. Enable the `circuit-breaker` feature for
 //! automatic circuit-breaking on repeated failures.
 
+/// Error types.
 pub mod error;
 
 use std::time::Duration;
@@ -337,5 +339,274 @@ mod tests {
     fn client_builder_default_trait() {
         let builder = ClientBuilder::default();
         assert_eq!(builder.retries, 3);
+    }
+
+    // ---- Additional ClientBuilder tests ----
+
+    #[test]
+    fn client_builder_new_creates_valid_builder() {
+        let builder = ClientBuilder::new();
+        assert_eq!(builder.retries, 3);
+        assert!(builder.base_url.is_none());
+        let client = builder.build();
+        assert!(client.base_url.is_none());
+    }
+
+    #[test]
+    fn client_builder_base_url_strips_trailing_slash_on_build() {
+        let client = ClientBuilder::new()
+            .base_url("https://api.example.com/")
+            .build();
+        let resolved = client.resolve_url("/users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn client_builder_timeout_zero() {
+        let client = ClientBuilder::new()
+            .timeout(Duration::from_secs(0))
+            .build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_timeout_large() {
+        let client = ClientBuilder::new()
+            .timeout(Duration::from_secs(3600))
+            .build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_retries_zero() {
+        let builder = ClientBuilder::new().retries(0);
+        assert_eq!(builder.retries, 0);
+    }
+
+    #[test]
+    fn client_builder_retries_large() {
+        let builder = ClientBuilder::new().retries(1000);
+        assert_eq!(builder.retries, 1000);
+    }
+
+    #[test]
+    fn client_builder_overwrite_retries() {
+        let builder = ClientBuilder::new()
+            .retries(5)
+            .retries(10);
+        assert_eq!(builder.retries, 10);
+    }
+
+    #[test]
+    fn client_builder_overwrite_timeout() {
+        let client = ClientBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
+            .build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_full_chain() {
+        let client = ClientBuilder::new()
+            .base_url("https://api.example.com")
+            .timeout(Duration::from_secs(15))
+            .retries(7)
+            .build();
+        assert_eq!(client.base_url.as_deref(), Some("https://api.example.com"));
+    }
+
+    // ---- Additional Client tests ----
+
+    #[test]
+    fn client_new_creates_default() {
+        let client = Client::new();
+        assert!(client.base_url.is_none());
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_factory_method() {
+        let client = Client::builder()
+            .base_url("https://example.com")
+            .build();
+        assert_eq!(client.base_url.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn client_builder_factory_default() {
+        let client = Client::builder().build();
+        assert!(client.base_url.is_none());
+    }
+
+    // ---- Additional URL resolution tests ----
+
+    #[test]
+    fn url_resolution_empty_path_with_base() {
+        let client = Client {
+            base_url: Some("https://api.example.com".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("");
+        assert_eq!(resolved, "https://api.example.com/");
+    }
+
+    #[test]
+    fn url_resolution_base_multiple_trailing_slashes() {
+        let client = Client {
+            base_url: Some("https://api.example.com///".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("/users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn url_resolution_full_url_with_base() {
+        let client = Client {
+            base_url: Some("https://api.example.com".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("users/1");
+        assert_eq!(resolved, "https://api.example.com/users/1");
+    }
+
+    #[test]
+    fn url_resolution_deeply_nested_path() {
+        let client = Client {
+            base_url: Some("https://api.example.com".into()),
+            inner: Client::new().inner,
+        };
+        let resolved = client.resolve_url("/v1/users/42/posts/7/comments");
+        assert_eq!(
+            resolved,
+            "https://api.example.com/v1/users/42/posts/7/comments"
+        );
+    }
+
+    // ---- Additional FetchError display tests ----
+
+    #[test]
+    fn fetch_error_network_empty_message() {
+        let err = FetchError::Network("".into());
+        let msg = err.to_string();
+        assert!(msg.contains("network error"));
+    }
+
+    #[test]
+    fn fetch_error_network_long_message() {
+        let err = FetchError::Network("DNS resolution failed for api.example.com: NXDOMAIN".into());
+        let msg = err.to_string();
+        assert!(msg.contains("DNS resolution failed"));
+        assert!(msg.contains("NXDOMAIN"));
+    }
+
+    #[test]
+    fn fetch_error_timeout_zero_duration() {
+        let err = FetchError::Timeout(Duration::from_secs(0));
+        let msg = err.to_string();
+        assert!(msg.contains("request timed out"));
+        assert!(msg.contains("0ns"));
+    }
+
+    #[test]
+    fn fetch_error_timeout_large_duration() {
+        let err = FetchError::Timeout(Duration::from_secs(3600));
+        let msg = err.to_string();
+        assert!(msg.contains("request timed out"));
+        assert!(msg.contains("3600s"));
+    }
+
+    #[test]
+    fn fetch_error_status_code_various_codes() {
+        for code in [400, 401, 403, 404, 429, 500, 502, 503] {
+            let err = FetchError::StatusCode {
+                status: code,
+                body: format!("error {code}"),
+            };
+            let msg = err.to_string();
+            assert!(msg.contains(&code.to_string()));
+            assert!(msg.contains("HTTP"));
+        }
+    }
+
+    #[test]
+    fn fetch_error_status_code_empty_body() {
+        let err = FetchError::StatusCode {
+            status: 404,
+            body: String::new(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("404"));
+    }
+
+    #[test]
+    fn fetch_error_serialization_various_errors() {
+        let json_err = serde_json::from_str::<serde_json::Value>("").unwrap_err();
+        let err = FetchError::Serialization(json_err);
+        let msg = err.to_string();
+        assert!(msg.contains("serialization error"));
+    }
+
+    #[test]
+    fn fetch_error_debug_format() {
+        let errors = vec![
+            FetchError::Network("test".into()),
+            FetchError::Timeout(Duration::from_secs(1)),
+            FetchError::StatusCode {
+                status: 500,
+                body: "err".into(),
+            },
+            FetchError::CircuitOpen,
+            FetchError::Middleware("mw".into()),
+        ];
+        for err in errors {
+            let debug_str = format!("{:?}", err);
+            assert!(!debug_str.is_empty());
+        }
+    }
+
+    #[test]
+    fn fetch_error_is_std_error() {
+        let err = FetchError::Network("test".into());
+        let std_err: &dyn std::error::Error = &err;
+        assert!(std_err.to_string().contains("network error"));
+    }
+
+    #[test]
+    fn fetch_error_from_serde_json_roundtrip() {
+        let json_err =
+            serde_json::from_str::<serde_json::Value>("invalid json!!").unwrap_err();
+        let msg = json_err.to_string();
+        let fetch_err = FetchError::from(json_err);
+        let fetch_msg = fetch_err.to_string();
+        assert!(fetch_msg.contains("serialization error"));
+        assert!(fetch_msg.contains(&msg));
+    }
+
+    // ---- Client clone test ----
+
+    #[test]
+    fn client_clone_preserves_base_url() {
+        let client = Client::builder()
+            .base_url("https://api.example.com")
+            .build();
+        let cloned = client.clone();
+        assert_eq!(
+            cloned.base_url.as_deref(),
+            Some("https://api.example.com")
+        );
+    }
+
+    #[test]
+    fn client_clone_independence() {
+        let client1 = Client::builder()
+            .base_url("https://first.com")
+            .build();
+        let client2 = client1.clone();
+        assert_eq!(
+            client2.base_url.as_deref(),
+            Some("https://first.com")
+        );
     }
 }

@@ -12,7 +12,9 @@ pub enum FetchError {
     /// The server returned a non-success status code.
     #[error("HTTP {status}: {body}")]
     StatusCode {
+        /// HTTP status code.
         status: u16,
+        /// Response body.
         body: String,
     },
 

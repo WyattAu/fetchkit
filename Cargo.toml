@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/WyattAu/fetchkit"
 keywords = ["http", "reqwest", "retry", "circuit-breaker", "resilient"]
 categories = ["network-programming", "web-programming"]
+exclude = ["/target"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false }
