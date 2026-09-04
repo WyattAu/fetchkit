@@ -29,12 +29,23 @@ pub enum FetchError {
     /// A middleware error from reqwest-middleware.
     #[error("middleware error: {0}")]
     Middleware(String),
+
+    /// Failed to build the client.
+    #[error("build error: {0}")]
+    BuildError(String),
+
+    /// Failed to set a header.
+    #[error("header error: {0}")]
+    HeaderError(String),
 }
 
 impl From<reqwest::Error> for FetchError {
     fn from(err: reqwest::Error) -> Self {
         if err.is_timeout() {
-            FetchError::Timeout(std::time::Duration::from_secs(30))
+            // The reqwest::Error does not expose the configured timeout duration,
+            // so we use ZERO to indicate "the timeout triggered but the actual
+            // duration is unknown at this point."
+            FetchError::Timeout(std::time::Duration::ZERO)
         } else {
             FetchError::Network(err.to_string())
         }

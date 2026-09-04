@@ -1,5 +1,5 @@
 [package]
-name = "resilient-fetch"
+name = "fetchkit"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
@@ -12,15 +12,16 @@ exclude = ["/target"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false }
-reqwest-middleware = { version = "0.4", features = ["json"] }
+reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.7"
-serde = { version = "1", features = ["derive"] }
+serde = "1"
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt", "macros"] }
-url = "2"
+http = "1"
+async-trait = "0.1"
+anyhow = "1"
 
-tower = { version = "0.5", optional = true }
+breaker = { version = "0.3", path = "/home/wyatt/dev/src/github.com/WyattAu/breaker", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
@@ -33,10 +34,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [features]
 default = ["json", "rustls-tls"]
 json = ["reqwest/json"]
+multipart = ["reqwest/multipart"]
 rustls-tls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls"]
-circuit-breaker = []
-metrics = ["dep:tower"]
+circuit-breaker = ["dep:breaker"]
 
 [[bench]]
 name = "fetch_bench"

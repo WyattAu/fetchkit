@@ -1,4 +1,4 @@
-# resilient-fetch
+# fetchkit
 
 Resilient HTTP client for Rust — retry, circuit breaker, connection pooling, and typed JSON helpers built on reqwest.
 
@@ -27,6 +27,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let user: serde_json::Value = client.get_json("/users/1").await?;
     println!("{user:#}");
+
+    Ok(())
+}
+```
+
+## Circuit Breaker
+
+Enable the `circuit-breaker` feature to wrap requests in a breaker that
+automatically rejects calls after repeated failures.
+
+```rust
+use fetchkit::Client;
+use breaker::{CircuitBreaker, CircuitBreakerConfig};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let breaker = CircuitBreaker::new(CircuitBreakerConfig::standard());
+
+    let client = Client::builder()
+        .base_url("https://api.example.com")
+        .with_breaker(breaker)
+        .build();
+
+    // When the circuit opens, requests will return Err(FetchError::CircuitOpen).
+    Ok(())
+}
+```
+
+## Request Builder
+
+```rust
+use fetchkit::Client;
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::builder()
+        .base_url("https://api.example.com")
+        .default_header("Authorization", "Bearer token")
+        .build();
+
+    // Fluent request builder
+    let value: serde_json::Value = client
+        .get("/users/1")
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    // Or deserialize directly
+    let user: serde_json::Value = client
+        .post("/users")
+        .json(&serde_json::json!({"name": "Alice"}))
+        .json_response()
+        .await?;
 
     Ok(())
 }

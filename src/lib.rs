@@ -9,12 +9,14 @@
 
 /// Error types.
 pub mod error;
+/// Middleware implementations.
+pub mod middleware;
 
 use std::time::Duration;
 
 use reqwest_middleware::{ClientBuilder as ReqwestClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
-use serde::{de::DeserializeOwned, Serialize};
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+use serde::{Serialize, de::DeserializeOwned};
 
 pub use error::FetchError;
 pub use reqwest::Response;
@@ -32,6 +34,11 @@ pub struct ClientBuilder {
     retry_policy: ExponentialBackoff,
     base_url: Option<String>,
     retries: u32,
+    initial_backoff: Duration,
+    max_backoff: Duration,
+    default_headers: reqwest::header::HeaderMap,
+    #[cfg(feature = "circuit-breaker")]
+    breaker: Option<breaker::CircuitBreaker>,
 }
 
 impl Default for ClientBuilder {
@@ -43,17 +50,20 @@ impl Default for ClientBuilder {
 impl ClientBuilder {
     /// Create a new builder with defaults (30s timeout, 3 retries, exponential backoff).
     pub fn new() -> Self {
-        let retry_policy = ExponentialBackoff::builder()
-            .build_with_max_retries(3);
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
 
-        let reqwest_builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30));
+        let reqwest_builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
 
         Self {
             reqwest_builder,
             retry_policy,
             base_url: None,
             retries: 3,
+            initial_backoff: Duration::from_millis(500),
+            max_backoff: Duration::from_secs(30),
+            default_headers: reqwest::header::HeaderMap::new(),
+            #[cfg(feature = "circuit-breaker")]
+            breaker: None,
         }
     }
 
@@ -72,8 +82,41 @@ impl ClientBuilder {
     /// Set the maximum number of retries.
     pub fn retries(mut self, retries: u32) -> Self {
         self.retries = retries;
+        self.retry_policy = ExponentialBackoff::builder().build_with_max_retries(retries);
+        self
+    }
+
+    /// Set the initial and maximum retry backoff durations.
+    pub fn retry_bounds(mut self, initial: Duration, max: Duration) -> Self {
+        self.initial_backoff = initial;
+        self.max_backoff = max;
         self.retry_policy = ExponentialBackoff::builder()
-            .build_with_max_retries(retries);
+            .retry_bounds(initial, max)
+            .build_with_max_retries(self.retries);
+        self
+    }
+
+    /// Add a default header applied to every request.
+    pub fn default_header(mut self, key: &'static str, value: &'static str) -> Self {
+        let name = http::header::HeaderName::from_static(key);
+        let val = http::HeaderValue::from_str(value).expect("invalid header value");
+        self.default_headers.insert(name, val);
+        self
+    }
+
+    /// Set multiple default headers applied to every request.
+    pub fn default_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
+        for (key, value) in headers {
+            if let Some(key) = key {
+                self.default_headers.insert(key, value);
+            }
+        }
+        self
+    }
+
+    /// Set the `User-Agent` header.
+    pub fn user_agent(mut self, agent: &'static str) -> Self {
+        self.reqwest_builder = self.reqwest_builder.user_agent(agent);
         self
     }
 
@@ -83,17 +126,47 @@ impl ClientBuilder {
         self
     }
 
-    /// Build the [`Client`].
-    pub fn build(self) -> Client {
-        let reqwest_client = self.reqwest_builder.build().expect("failed to build reqwest client");
-        let inner = ReqwestClientBuilder::new(reqwest_client)
-            .with(RetryTransientMiddleware::new_with_policy(self.retry_policy))
-            .build();
+    /// Attach a circuit breaker to the client (requires the `circuit-breaker` feature).
+    #[cfg(feature = "circuit-breaker")]
+    pub fn with_breaker(mut self, breaker: breaker::CircuitBreaker) -> Self {
+        self.breaker = Some(breaker);
+        self
+    }
 
-        Client {
+    /// Build the [`Client`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying `reqwest::Client` cannot be built. This should
+    /// only happen due to process-startup defects (e.g. invalid TLS config),
+    /// not from user input at runtime.
+    #[allow(clippy::expect_used)]
+    pub fn build(self) -> Client {
+        self.try_build()
+            .expect("failed to build reqwest client — this is a process-startup defect")
+    }
+
+    /// Build the [`Client`], returning a [`FetchError`] on failure.
+    pub fn try_build(self) -> Result<Client, FetchError> {
+        let reqwest_client = self
+            .reqwest_builder
+            .build()
+            .map_err(|e| FetchError::BuildError(e.to_string()))?;
+
+        let mut builder = ReqwestClientBuilder::new(reqwest_client)
+            .with(RetryTransientMiddleware::new_with_policy(self.retry_policy));
+
+        #[cfg(feature = "circuit-breaker")]
+        if let Some(breaker) = self.breaker {
+            builder = builder.with(middleware::CircuitBreakerMiddleware::new(breaker));
+        }
+
+        let inner = builder.build();
+
+        Ok(Client {
             inner,
             base_url: self.base_url,
-        }
+        })
     }
 }
 
@@ -108,6 +181,16 @@ impl Client {
         ClientBuilder::new()
     }
 
+    /// Construct a [`Client`] from a pre-built [`ClientWithMiddleware`] and
+    /// an optional base URL.
+    ///
+    /// This is useful when you need to attach custom middleware (e.g. a
+    /// circuit breaker from an external registry) that fetchkit's builder
+    /// does not natively support.
+    pub fn from_parts(inner: ClientWithMiddleware, base_url: Option<String>) -> Self {
+        Self { inner, base_url }
+    }
+
     /// Resolve a path against the optional base URL.
     pub(crate) fn resolve_url(&self, url: &str) -> String {
         match &self.base_url {
@@ -117,6 +200,42 @@ impl Client {
                 format!("{base}/{path}")
             }
             None => url.to_string(),
+        }
+    }
+
+    /// Create a [`RequestBuilder`] for a GET request.
+    pub fn get(&self, url: impl Into<String>) -> RequestBuilder<'_> {
+        let url = self.resolve_url(&url.into());
+        RequestBuilder {
+            client: self,
+            builder: self.inner.get(&url),
+        }
+    }
+
+    /// Create a [`RequestBuilder`] for a POST request.
+    pub fn post(&self, url: impl Into<String>) -> RequestBuilder<'_> {
+        let url = self.resolve_url(&url.into());
+        RequestBuilder {
+            client: self,
+            builder: self.inner.post(&url),
+        }
+    }
+
+    /// Create a [`RequestBuilder`] for a PUT request.
+    pub fn put(&self, url: impl Into<String>) -> RequestBuilder<'_> {
+        let url = self.resolve_url(&url.into());
+        RequestBuilder {
+            client: self,
+            builder: self.inner.put(&url),
+        }
+    }
+
+    /// Create a [`RequestBuilder`] for a DELETE request.
+    pub fn delete(&self, url: impl Into<String>) -> RequestBuilder<'_> {
+        let url = self.resolve_url(&url.into());
+        RequestBuilder {
+            client: self,
+            builder: self.inner.delete(&url),
         }
     }
 
@@ -135,11 +254,7 @@ impl Client {
         body: &B,
     ) -> Result<T, FetchError> {
         let url = self.resolve_url(url);
-        let response = self.inner
-            .post(&url)
-            .json(body)
-            .send()
-            .await?;
+        let response = self.inner.post(&url).json(body).send().await?;
         let response = Self::check_status(response).await?;
         Ok(response.json().await?)
     }
@@ -176,6 +291,99 @@ impl Client {
 impl Default for Client {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A wrapper around `reqwest_middleware::RequestBuilder` that provides a
+/// ergonomic API and resolves the URL against the client's base URL.
+pub struct RequestBuilder<'a> {
+    #[allow(dead_code)]
+    client: &'a Client,
+    builder: reqwest_middleware::RequestBuilder,
+}
+
+impl<'a> RequestBuilder<'a> {
+    /// Add a single header.
+    pub fn header<K, V>(mut self, key: K, value: V) -> Self
+    where
+        http::header::HeaderName: TryFrom<K>,
+        <http::header::HeaderName as TryFrom<K>>::Error: Into<http::Error>,
+        http::HeaderValue: TryFrom<V>,
+        <http::HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        self.builder = self.builder.header(key, value);
+        self
+    }
+
+    /// Set all headers from a `HeaderMap`.
+    pub fn headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
+        self.builder = self.builder.headers(headers);
+        self
+    }
+
+    /// Append query parameters.
+    pub fn query<T: Serialize + ?Sized>(mut self, params: &T) -> Self {
+        self.builder = self.builder.query(params);
+        self
+    }
+
+    /// Override the request timeout.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.builder = self.builder.timeout(timeout);
+        self
+    }
+
+    /// Set a JSON body.
+    pub fn json<T: Serialize + ?Sized>(mut self, body: &T) -> Self {
+        self.builder = self.builder.json(body);
+        self
+    }
+
+    /// Set a `Bearer` authorization token.
+    pub fn bearer_auth(mut self, token: impl std::fmt::Display) -> Self {
+        self.builder = self.builder.bearer_auth(token);
+        self
+    }
+
+    /// Set HTTP basic auth credentials.
+    pub fn basic_auth(
+        mut self,
+        username: impl std::fmt::Display,
+        password: Option<impl std::fmt::Display>,
+    ) -> Self {
+        self.builder = self.builder.basic_auth(username, password);
+        self
+    }
+
+    /// Set the request body directly.
+    pub fn body(mut self, body: impl Into<reqwest::Body>) -> Self {
+        self.builder = self.builder.body(body);
+        self
+    }
+
+    /// Set form-encoded body from a serializable value.
+    pub fn form<T: Serialize + ?Sized>(mut self, form: &T) -> Self {
+        self.builder = self.builder.form(form);
+        self
+    }
+
+    /// Set a multipart form body (requires the `multipart` feature).
+    #[cfg(feature = "multipart")]
+    pub fn multipart(mut self, form: reqwest::multipart::Form) -> Self {
+        self.builder = self.builder.multipart(form);
+        self
+    }
+
+    /// Send the request.
+    pub async fn send(self) -> Result<Response, FetchError> {
+        let response = self.builder.send().await?;
+        Client::check_status(response).await
+    }
+
+    /// Send the request and deserialize the JSON response.
+    pub async fn json_response<T: DeserializeOwned>(self) -> Result<T, FetchError> {
+        let response = self.send().await?;
+        Ok(response.json().await?)
     }
 }
 
@@ -260,8 +468,7 @@ mod tests {
 
     #[test]
     fn fetch_error_serialization_display() {
-        let json_err =
-            serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let json_err = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
         let err = FetchError::Serialization(json_err);
         let msg = err.to_string();
         assert!(msg.contains("serialization error"));
@@ -363,9 +570,7 @@ mod tests {
 
     #[test]
     fn client_builder_timeout_zero() {
-        let client = ClientBuilder::new()
-            .timeout(Duration::from_secs(0))
-            .build();
+        let client = ClientBuilder::new().timeout(Duration::from_secs(0)).build();
         let _ = client.inner();
     }
 
@@ -391,9 +596,7 @@ mod tests {
 
     #[test]
     fn client_builder_overwrite_retries() {
-        let builder = ClientBuilder::new()
-            .retries(5)
-            .retries(10);
+        let builder = ClientBuilder::new().retries(5).retries(10);
         assert_eq!(builder.retries, 10);
     }
 
@@ -427,9 +630,7 @@ mod tests {
 
     #[test]
     fn client_builder_factory_method() {
-        let client = Client::builder()
-            .base_url("https://example.com")
-            .build();
+        let client = Client::builder().base_url("https://example.com").build();
         assert_eq!(client.base_url.as_deref(), Some("https://example.com"));
     }
 
@@ -575,8 +776,7 @@ mod tests {
 
     #[test]
     fn fetch_error_from_serde_json_roundtrip() {
-        let json_err =
-            serde_json::from_str::<serde_json::Value>("invalid json!!").unwrap_err();
+        let json_err = serde_json::from_str::<serde_json::Value>("invalid json!!").unwrap_err();
         let msg = json_err.to_string();
         let fetch_err = FetchError::from(json_err);
         let fetch_msg = fetch_err.to_string();
@@ -592,21 +792,121 @@ mod tests {
             .base_url("https://api.example.com")
             .build();
         let cloned = client.clone();
-        assert_eq!(
-            cloned.base_url.as_deref(),
-            Some("https://api.example.com")
-        );
+        assert_eq!(cloned.base_url.as_deref(), Some("https://api.example.com"));
     }
 
     #[test]
     fn client_clone_independence() {
-        let client1 = Client::builder()
-            .base_url("https://first.com")
-            .build();
+        let client1 = Client::builder().base_url("https://first.com").build();
         let client2 = client1.clone();
-        assert_eq!(
-            client2.base_url.as_deref(),
-            Some("https://first.com")
-        );
+        assert_eq!(client2.base_url.as_deref(), Some("https://first.com"));
+    }
+
+    // ---- New builder method tests ----
+
+    #[test]
+    fn client_builder_default_header() {
+        let client = ClientBuilder::new()
+            .default_header("x-custom", "value")
+            .build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_user_agent() {
+        let client = ClientBuilder::new().user_agent("fetchkit/0.1").build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_retry_bounds() {
+        let builder =
+            ClientBuilder::new().retry_bounds(Duration::from_millis(100), Duration::from_secs(5));
+        assert_eq!(builder.retries, 3);
+        let client = builder.build();
+        let _ = client.inner();
+    }
+
+    #[test]
+    fn client_builder_try_build_success() {
+        let result = ClientBuilder::new().try_build();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fetch_error_build_error_display() {
+        let err = FetchError::BuildError("tls error".into());
+        let msg = err.to_string();
+        assert!(msg.contains("build error"));
+        assert!(msg.contains("tls error"));
+    }
+
+    #[test]
+    fn fetch_error_header_error_display() {
+        let err = FetchError::HeaderError("invalid header".into());
+        let msg = err.to_string();
+        assert!(msg.contains("header error"));
+        assert!(msg.contains("invalid header"));
+    }
+
+    #[test]
+    fn client_get_returns_request_builder() {
+        let client = Client::new();
+        let builder = client.get("https://example.com");
+        let _ = builder;
+    }
+
+    #[test]
+    fn client_post_returns_request_builder() {
+        let client = Client::new();
+        let builder = client.post("https://example.com");
+        let _ = builder;
+    }
+
+    #[test]
+    fn client_put_returns_request_builder() {
+        let client = Client::new();
+        let builder = client.put("https://example.com");
+        let _ = builder;
+    }
+
+    #[test]
+    fn client_delete_returns_request_builder() {
+        let client = Client::new();
+        let builder = client.delete("https://example.com");
+        let _ = builder;
+    }
+
+    #[test]
+    fn request_builder_header_chain() {
+        let client = Client::new();
+        let builder = client
+            .get("https://example.com")
+            .header("X-Test", "value")
+            .bearer_auth("token");
+        let _ = builder;
+    }
+
+    #[test]
+    fn request_builder_query_chain() {
+        let client = Client::new();
+        let builder = client.get("https://example.com").query(&[("key", "value")]);
+        let _ = builder;
+    }
+
+    #[test]
+    fn request_builder_timeout_chain() {
+        let client = Client::new();
+        let builder = client
+            .get("https://example.com")
+            .timeout(Duration::from_secs(5));
+        let _ = builder;
+    }
+
+    #[test]
+    fn fetch_error_from_reqwest_timeout_uses_zero_duration() {
+        let err = FetchError::Timeout(Duration::ZERO);
+        assert!(err.to_string().contains("request timed out"));
+        assert!(err.to_string().contains("0"));
     }
 }
