@@ -87,7 +87,8 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "breaker"
-version = "0.3.0"
+version = "1.0.0"
+source = "git+https://github.com/WyattAu/breaker#f995cd89ef08ab3901ecccc472310c62664860cc"
 dependencies = [
  "loom",
  "parking_lot 0.12.5",
@@ -326,7 +327,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetchkit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",

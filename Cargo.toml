@@ -1,6 +1,6 @@
 [package]
 name = "fetchkit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Resilient HTTP client for Rust — retry, circuit breaker, connection pooling, and typed JSON helpers built on reqwest"
@@ -21,7 +21,7 @@ http = "1"
 async-trait = "0.1"
 anyhow = "1"
 
-breaker = { version = "0.3", path = "/home/wyatt/dev/src/github.com/WyattAu/breaker", optional = true }
+breaker = { version = "1", git = "https://github.com/WyattAu/breaker", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
