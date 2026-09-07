@@ -12,7 +12,7 @@ exclude = ["/target"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false }
-reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
+reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
 reqwest-retry = "0.7"
 serde = "1"
 serde_json = "1"
