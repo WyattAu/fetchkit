@@ -153,13 +153,16 @@ impl ClientBuilder {
             .build()
             .map_err(|e| FetchError::BuildError(e.to_string()))?;
 
-        let mut builder = ReqwestClientBuilder::new(reqwest_client)
+        let builder = ReqwestClientBuilder::new(reqwest_client)
             .with(RetryTransientMiddleware::new_with_policy(self.retry_policy));
 
         #[cfg(feature = "circuit-breaker")]
-        if let Some(breaker) = self.breaker {
-            builder = builder.with(middleware::CircuitBreakerMiddleware::new(breaker));
-        }
+        let builder = match self.breaker {
+            Some(breaker) => {
+                builder.with(middleware::CircuitBreakerMiddleware::new(breaker))
+            }
+            None => builder,
+        };
 
         let inner = builder.build();
 
