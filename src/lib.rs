@@ -97,6 +97,11 @@ impl ClientBuilder {
     }
 
     /// Add a default header applied to every request.
+    ///
+    /// # Panics
+    /// Panics if `key` or `value` is not a valid HTTP header string —
+    /// this is a caller programming error, not a runtime condition.
+    #[allow(clippy::expect_used)]
     pub fn default_header(mut self, key: &'static str, value: &'static str) -> Self {
         let name = http::header::HeaderName::from_static(key);
         let val = http::HeaderValue::from_str(value).expect("invalid header value");
@@ -158,9 +163,7 @@ impl ClientBuilder {
 
         #[cfg(feature = "circuit-breaker")]
         let builder = match self.breaker {
-            Some(breaker) => {
-                builder.with(middleware::CircuitBreakerMiddleware::new(breaker))
-            }
+            Some(breaker) => builder.with(middleware::CircuitBreakerMiddleware::new(breaker)),
             None => builder,
         };
 
@@ -392,6 +395,7 @@ impl<'a> RequestBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)] // test assertions unwrap by design
     use super::*;
     use std::time::Duration;
 
