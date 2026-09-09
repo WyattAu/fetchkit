@@ -42,3 +42,7 @@ circuit-breaker = ["dep:breaker"]
 [[bench]]
 name = "fetch_bench"
 harness = false
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
