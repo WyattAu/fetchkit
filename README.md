@@ -2,6 +2,12 @@
 
 Resilient HTTP client for Rust — retry, circuit breaker, connection pooling, and typed JSON helpers built on reqwest.
 
+> **Note on publishing:** the crate name `fetchkit` on crates.io belongs to an
+> unrelated project (maintained by `everruns`, currently at 0.5.0). This crate
+> has never been published to crates.io under this name and its versions
+> (0.1.x) are tracked only via git tags in this repository. Renaming is under
+> discussion — until resolved, do **not** `cargo publish` this crate.
+
 ## Features
 
 - **Automatic retries** with exponential backoff via `reqwest-retry`

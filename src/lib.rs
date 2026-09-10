@@ -96,11 +96,14 @@ impl ClientBuilder {
         self
     }
 
-    /// Add a default header applied to every request.
+    /// Add a default header applied to every request (infallible for
+    /// compile-time string literals).
     ///
     /// # Panics
     /// Panics if `key` or `value` is not a valid HTTP header string —
     /// this is a caller programming error, not a runtime condition.
+    /// Use [`default_headers`](Self::default_headers) with a `HeaderMap`
+    /// for a fallible variant.
     #[allow(clippy::expect_used)]
     pub fn default_header(mut self, key: &'static str, value: &'static str) -> Self {
         let name = http::header::HeaderName::from_static(key);
