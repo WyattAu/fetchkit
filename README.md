@@ -1,5 +1,8 @@
 # fetchkit
 
+[![Rust](https://img.shields.io/badge/rustc-1.85+-blue.svg)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+
 Resilient HTTP client for Rust — retry, circuit breaker, connection pooling, and typed JSON helpers built on reqwest.
 
 > **Note on publishing:** the crate name `fetchkit` on crates.io belongs to an
