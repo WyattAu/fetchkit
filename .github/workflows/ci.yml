@@ -23,3 +23,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features
+
+  # Wire-level integration tests (tests/wire.rs): real HTTP servers on
+  # loopback via wiremock — request shape, retry, timeouts, circuit
+  # breaker, multipart. No external services needed.
+  integration:
+    name: Integration (wire)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: wire tests (all features)
+        run: cargo test --all-features --test wire -- --nocapture

@@ -55,7 +55,28 @@ impl From<reqwest::Error> for FetchError {
 impl From<reqwest_middleware::Error> for FetchError {
     fn from(err: reqwest_middleware::Error) -> Self {
         match err {
-            reqwest_middleware::Error::Middleware(e) => FetchError::Middleware(e.to_string()),
+            reqwest_middleware::Error::Middleware(e) => {
+                // Preserve fetchkit's own middleware errors (e.g.
+                // `CircuitOpen`) so callers can match on them.
+                let e = match e.downcast::<FetchError>() {
+                    Ok(fetch_err) => return fetch_err,
+                    Err(e) => e,
+                };
+                // `RetryTransientMiddleware` re-wraps the final error in a
+                // `RetryError` even when no retries were performed —
+                // unwrap that layer before degrading to `Middleware`.
+                let e = match e.downcast::<reqwest_retry::RetryError>() {
+                    Ok(retry_err) => {
+                        let inner = match retry_err {
+                            reqwest_retry::RetryError::Error(inner) => inner,
+                            reqwest_retry::RetryError::WithRetries { err, .. } => err,
+                        };
+                        return FetchError::from(inner);
+                    }
+                    Err(e) => e,
+                };
+                FetchError::Middleware(e.to_string())
+            }
             reqwest_middleware::Error::Reqwest(e) => FetchError::from(e),
         }
     }

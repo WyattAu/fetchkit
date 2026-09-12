@@ -34,9 +34,12 @@ impl Middleware for CircuitBreakerMiddleware {
 
         match self.breaker.state() {
             State::Open => {
-                return Err(reqwest_middleware::Error::Middleware(anyhow::anyhow!(
-                    FetchError::CircuitOpen
-                )));
+                // `From<FetchError> for anyhow::Error` keeps the concrete
+                // type, so `FetchError::from` can downcast it back and
+                // surface `FetchError::CircuitOpen` to the caller.
+                return Err(reqwest_middleware::Error::Middleware(
+                    FetchError::CircuitOpen.into(),
+                ));
             }
             State::HalfOpen => {}
             State::Closed => {}
