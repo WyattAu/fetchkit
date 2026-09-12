@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use fetchkit::{Client, ClientBuilder, FetchError};
 use serde::{Deserialize, Serialize};
-use wiremock::matchers::{body_string_contains, header, method, path, query_param};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -467,6 +467,7 @@ mod breaker_wire {
 async fn multipart_upload_carries_text_and_file_parts() {
     use fetchkit::Client;
     use wiremock::ResponseTemplate as RT;
+    use wiremock::matchers::body_string_contains;
 
     let server = MockServer::start().await;
     // (Content-type carries a boundary suffix, so instead of matching the

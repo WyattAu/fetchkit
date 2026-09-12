@@ -5,6 +5,28 @@ Changelog](https://keepachangelog.com/) — versions follow [semver](https://sem
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-12
+
+### Added
+
+- `tests/config_matrix.rs` (13 tests): behavior-observable wire coverage for
+  the remaining builder/request knobs — `default_header`/`default_headers`
+  (stamped on every request; per-request headers take precedence),
+  `user_agent`, `reqwest_builder` (raw config applied verbatim),
+  `retry_bounds` (pacing observably changes; jitter-aware assertion),
+  `timeout` and `base_url` default-vs-configured contrasts, and the
+  `RequestBuilder` `basic_auth`/`headers`/`form`/`json`/`query` shapes.
+  Retry-count, timeout-override, breaker, and multipart knobs were already
+  wire-proven in `tests/wire.rs`.
+
+### Fixed
+
+- **Dead knob:** `ClientBuilder::default_header`/`default_headers` stored
+  into a field that `build()` never read — the headers silently never
+  reached the wire. `try_build` now applies them to the underlying
+  `reqwest` client (same release also carries 0.1.2's wire suite; this
+  crate is not published to crates.io under this name).
+
 ## [0.1.2] - 2026-09-12
 
 ### Added

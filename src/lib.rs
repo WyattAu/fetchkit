@@ -158,6 +158,10 @@ impl ClientBuilder {
     pub fn try_build(self) -> Result<Client, FetchError> {
         let reqwest_client = self
             .reqwest_builder
+            // Builder-level default headers must actually reach the wire:
+            // they apply to every request, with per-request headers taking
+            // precedence on conflict.
+            .default_headers(self.default_headers)
             .build()
             .map_err(|e| FetchError::BuildError(e.to_string()))?;
 
